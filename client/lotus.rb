@@ -2,8 +2,11 @@ require 'jsonrpc-client'
 
 MinerPower = Struct.new(:miner_power, :total_power, :has_min_power)
 StorageAsk = Struct.new(:price, :verified_price, :min_piece_size, :max_piece_size)
-DealInfo = Struct.new(:proposal_id, :state, :miner_id, :data_cid, :piece_cid, :piece_size,
+DealInfo = Struct.new(:proposal_cid, :state, :miner_id, :data_cid, :piece_cid, :piece_size,
                       :price_per_epoch, :duration, :deal_id, :creation_time, :verified)
+Import = Struct.new(:import_id, :data_cid, :file_path)
+QueryOffer = Struct.new(:data_cid, :size, :min_price, :unseal_price, :payment_interval,
+                        :payment_interval_increase, :miner_id, :peer_address, :peer_id)
 
 class LotusClient
   @@deal_state_map = %i[
@@ -47,41 +50,49 @@ class LotusClient
     @client = JSONRPC::Client.new('http://127.0.0.1:1234/rpc/v0', { connection: connection })
   end
 
+  # @return string
   def wallet_default_address
     @client.invoke('Filecoin.WalletDefaultAddress', [])
   end
 
+  # @return string
   def wallet_balance(wallet)
-    @client.invoke('Filecoin.WalletBalance', [wallet]).to_f
+    @client.invoke('Filecoin.WalletBalance', [wallet])
   end
 
+  # @return string[]
   def state_list_miners
     @client.invoke('Filecoin.StateListMiners', [nil])
   end
 
+  # @return string
   def state_miner_power(miner_id)
     response = @client.invoke('Filecoin.StateMinerPower', [miner_id, nil])
-    MinerPower.new(response['MinerPower'], response['TotalPower'], response['HasMinPower'])
+    MinerPower.new(response['MinerPower']['QualityAdjPower'], response['TotalPower']['QualityAdjPower'], response['HasMinPower'])
   end
 
-  def state_miner_peer_id(miner_id)
-    @client.invoke('Filecoin.StateMinerInfo', [miner_id, nil])['PeerId']
+  # @return sector_size(int) and peer_id(string)
+  def state_miner_info(miner_id)
+    response = @client.invoke('Filecoin.StateMinerInfo', [miner_id, nil])
+    [response['SectorSize'], response['PeerId']]
   end
 
-  # @return storage ask
+  # @return price: string, size: int
   def client_query_ask(peer_id, miner_id)
     response = @client.invoke('Filecoin.ClientQueryAsk', [peer_id, miner_id])
-    StorageAsk.new(response['Price'].to_f, response['VerifiedPrice'].to_f,
-                   response['MinPieceSize'].to_i, response['MaxPieceSize'].to_i)
+    StorageAsk.new(response['Price'], response['VerifiedPrice'],
+                   response['MinPieceSize'], response['MaxPieceSize'])
+  rescue Faraday::TimeoutError
+    :timeout
   end
 
-  # @return [data_cid, import_id]
+  # @return data_cid(string), import_id(int)
   def client_import(path, is_car = false)
     response = @client.invoke('Filecoin.ClientImport', [Path: path, IsCAR: is_car])
     [response['Root']['/'], response['ImportID']]
   end
 
-  # @return [piece_size, piece_cid]
+  # @return piece_size(int), piece_cid(string)
   def client_deal_piece_cid(data_cid)
     response = @client.invoke('Filecoin.ClientDealPieceCID', [{ '/' => data_cid }])
     [response['PieceSize'], response['PieceCID']['/']]
@@ -91,10 +102,10 @@ class LotusClient
   def client_start_deal(data_cid, wallet, miner_id, epoch_price, duration)
     @client.invoke('Filecoin.ClientStartDeal', [
                      Data: {
-                         TransferType: 'graphsync',
-                         Root: {
-                             '/' => data_cid
-                         }
+                       TransferType: 'graphsync',
+                       Root: {
+                         '/' => data_cid
+                       }
                      },
                      Wallet: wallet,
                      Miner: miner_id,
@@ -104,12 +115,54 @@ class LotusClient
                    ])['/']
   end
 
-  # @return list of DealInfo
+  # @return list of DealInfo, size and duration is int. others are string.
   def client_list_deals
     @client.invoke('Filecoin.ClientListDeals', []).map do |deal|
       DealInfo.new(deal['ProposalCid']['/'], @@deal_state_map[deal['State']], deal['Provider'], deal['DataRef']['Root']['/'],
-                   deal['PieceCID']['/'], deal['Size'], deal['PricePerEpoch'].to_f, deal['Duration'],
+                   deal['PieceCID']['/'], deal['Size'], deal['PricePerEpoch'], deal['Duration'],
                    deal['DealID'], deal['CreationTime'], deal['Verified'])
     end
+  end
+
+  # @return list of Import
+  def client_list_imports
+    @client.invoke('Filecoin.ClientListImports', [])
+           .filter { |import| import['Source'] == 'import' }.map do |import|
+      Import.new(import['Key'], import['Root']['/'], import['FilePath'])
+    end
+  end
+
+  def client_miner_query_offer(miner_id, data_cid)
+    response = @client.invoke('Filecoin.ClientMinerQueryOffer', [miner_id, {'/': data_cid}, nil])
+    QueryOffer.new(response['Root']['/'], response['Size'], response['MinPrice'],
+                   response['UnsealPrice'], response['PaymentInterval'], response['PaymentIntervalIncrease'],
+                   response['Miner'], response['MinerPeer']['Address'], response['MinerPeer']['ID'])
+  rescue Faraday::TimeoutError
+    :timeout
+  end
+
+  def client_retrieve(data_cid, size, price, unseal_price, payment_interval, payment_interval_increase,
+                      wallet, miner_id, miner_peer_address, miner_peer_id, file_path)
+    @client.invoke('Filecoin.ClientRetrieve',[{
+                   Root: {'/': data_cid},
+                   Piece: nil,
+                   Size: size,
+                   Total: price.to_i.to_s,
+                   UnsealPrice: unseal_price.to_i.to_s,
+                   PaymentInterval: payment_interval,
+                   PaymentIntervalIncrease: payment_interval_increase,
+                   Client: wallet,
+                   Miner: miner_id,
+                   MinerPeer: {
+                     Address: miner_peer_address,
+                     ID: miner_peer_id,
+                     PieceCID: nil
+                   }
+                 }, {
+                   Path: file_path,
+                   IsCAR: false
+                 }])
+  rescue Faraday::TimeoutError
+    :timeout
   end
 end
