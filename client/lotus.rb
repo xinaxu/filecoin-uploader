@@ -84,6 +84,8 @@ class LotusClient
                    response['MinPieceSize'], response['MaxPieceSize'])
   rescue Faraday::TimeoutError
     :timeout
+  rescue JSONRPC::Error::ServerError => e
+    :error
   end
 
   # @return data_cid(string), import_id(int)
@@ -139,6 +141,9 @@ class LotusClient
                    response['Miner'], response['MinerPeer']['Address'], response['MinerPeer']['ID'])
   rescue Faraday::TimeoutError
     :timeout
+  rescue JSONRPC::Error::ServerError => e
+    @logger.error e
+    :error
   end
 
   def client_retrieve(data_cid, size, price, unseal_price, payment_interval, payment_interval_increase,
@@ -164,5 +169,8 @@ class LotusClient
                  }])
   rescue Faraday::TimeoutError
     :timeout
+  rescue JSONRPC::Error::ServerError => e
+    @logger.error e
+    :error
   end
 end

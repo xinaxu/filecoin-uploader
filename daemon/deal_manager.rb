@@ -1,7 +1,12 @@
 require_relative '../database/database'
 require_relative '../client/lotus'
 class DealManager
-  def initialize(miner_manager, wallet, max_price = 1e9, duration = 518_400, min_copies = 10, num_threads = 32)
+  def initialize(miner_manager,
+                 wallet,
+                 max_price = 1e9,
+                 duration = 518_400,
+                 min_copies = 10,
+                 miner_blacklist = [])
     @duration = duration
     @wallet = wallet
     @max_price = max_price
@@ -11,6 +16,7 @@ class DealManager
     @base_path = File.join(ENV['slingshot_data_path'])
     @min_copies = min_copies
     @current_imported = @lotus.client_list_imports
+    @miner_blacklist = miner_blacklist
     Retrieval.where(state: 'started').update(state: 'new')
   end
 
@@ -65,11 +71,11 @@ class DealManager
     end
     if imported.nil?
       data_cid, import_id = @lotus.client_import File.join(@base_path, archive.dataset, archive.filename)
+      @logger.info("Imported to lotus #{archive.dataset}/#{archive.filename} - [#{import_id}] #{data_cid}")
     else
       data_cid = imported.data_cid
       import_id = imported.import_id
     end
-    @logger.info("Imported to lotus #{archive.dataset}/#{archive.filename} - [#{import_id}] #{data_cid}")
     piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
     archive.update(state: 'started', data_cid: data_cid, piece_cid: piece_cid,
                    import_id: import_id, piece_size: piece_size)
@@ -86,7 +92,7 @@ class DealManager
     return if valid_deals >= @min_copies
 
     miners = @miner_manager.get_miners_for_sealing(@min_copies - valid_deals, @max_price, archive.piece_size,
-                                                    current_deals.map(&:miner_id))
+                                                    current_deals.map(&:miner_id).push(@miner_blacklist))
     miners.each do |miner|
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
@@ -108,24 +114,29 @@ class DealManager
 
     current_deals.filter { |deal| state_success?(deal.state) }
                  .each do |deal|
-      current_retrieval = Retrieval.find_or_create_by(proposal_cid: deal.proposal_cid) do |retrieval|
-        retrieval.miner = Miner.find_by(miner_id: deal.miner_id)
-        retrieval.archive = archive
-        retrieval.state = 'new'
+      current_retrieval = Retrieval.find_by(proposal_cid: deal.proposal_cid)
+      if current_retrieval == nil
+        current_retrieval = Retrieval.create(
+          miner: Miner.find_by(miner_id: deal.miner_id),
+          archive: archive,
+          state: 'new'
+        )
       end
       next if current_retrieval.state != 'new'
 
       Thread.new do
-        lotus = LotusClient.new(30)
+        lotus = LotusClient.new(300)
+        @logger.info "Querying offer with #{deal.miner_id} for #{archive.dataset}/#{archive.filename}"
         offer = lotus.client_miner_query_offer(deal.miner_id, deal.data_cid)
-        if offer != :timeout
+        unless %i[timeout, error].include?(offer)
+          @logger.info "Retrieving with #{offer.miner_id} - #{offer.peer_address} for #{archive.dataset}/#{archive.filename}"
           response = lotus.client_retrieve(offer.data_cid, offer.size, offer.min_price,
                                            offer.unseal_price, offer.payment_interval,
                                            offer.payment_interval_increase, @wallet,
                                            offer.miner_id, offer.peer_address, offer.peer_id,
                                            '/dev/null')
         end
-        if offer == :timeout || response == :timeout
+        if %i[timeout, error].include?(offer) || %i[timeout, error].include?(response)
           current_retrieval.update(state: 'failed')
         else
           current_retrieval.update(state: 'success')

@@ -40,7 +40,7 @@ class MinerManager
     return unless miner_power.has_min_power
 
     storage_ask = lotus.client_query_ask peer_id, miner_id
-    return if storage_ask == :timeout
+    return if storage_ask == :timeout || storage_ask == :error
     Miner.create(miner_id: miner_id, peer_id: peer_id, sector_size: sector_size,
                  storage_power: miner_power.miner_power, price: storage_ask.price,
                  verified_price: storage_ask.verified_price,
@@ -73,7 +73,7 @@ class MinerManager
   def daemonize(check_interval = 3600, update_interval = 86400)
     Thread.new do
       loop do
-        @logger.info 'Start updating miners'
+        #@logger.info 'Start updating miners'
         miner_ids = @lotus.state_list_miners
         Parallel.each(miner_ids, in_threads: @num_threads) do |miner_id|
           miner = Miner.find_by(miner_id: miner_id)
@@ -86,7 +86,7 @@ class MinerManager
             update_each miner
           end
         end
-        @logger.info 'Miner update complete'
+        #@logger.info 'Miner update complete'
         sleep check_interval
       end
     end
