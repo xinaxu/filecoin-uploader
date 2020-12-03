@@ -44,10 +44,11 @@ class LotusClient
     connection = Faraday.new { |connection|
       connection.adapter Faraday.default_adapter
       connection.authorization(:Bearer, ENV['lotus_token'])
-      connection.options.timeout = 15
+      connection.options.timeout = timeout
       # connection.response :logger, @logger, :bodies => true
     }
     @client = JSONRPC::Client.new('http://127.0.0.1:1234/rpc/v0', { connection: connection })
+    @logger = Logger.new(STDOUT)
   end
 
   # @return string
@@ -85,6 +86,7 @@ class LotusClient
   rescue Faraday::TimeoutError
     :timeout
   rescue JSONRPC::Error::ServerError => e
+    # @logger.error e
     :error
   end
 
@@ -115,6 +117,8 @@ class LotusClient
                      MinBlocksDuration: duration,
                      FastRetrieval: true
                    ])['/']
+    rescue Faraday::TimeoutError => e
+      :timeout
   end
 
   # @return list of DealInfo, size and duration is int. others are string.
@@ -129,7 +133,7 @@ class LotusClient
   # @return list of Import
   def client_list_imports
     @client.invoke('Filecoin.ClientListImports', [])
-           .filter { |import| import['Source'] == 'import' }.map do |import|
+           .filter { |import| import['Source'] == 'import' }.reject { |x| x.nil? || x['Root'].nil? }.map do |import|
       Import.new(import['Key'], import['Root']['/'], import['FilePath'])
     end
   end
@@ -142,7 +146,7 @@ class LotusClient
   rescue Faraday::TimeoutError
     :timeout
   rescue JSONRPC::Error::ServerError => e
-    @logger.error e
+    # @logger.error e
     :error
   end
 
@@ -172,5 +176,15 @@ class LotusClient
   rescue JSONRPC::Error::ServerError => e
     @logger.error e
     :error
+  end
+
+  def deal_slashed?(deal_id)
+    return false if deal_id <= 0
+
+    response = @client.invoke('Filecoin.StateMarketStorageDeal', [deal_id, nil])
+    response['State']['SlashEpoch'] >= 0
+  rescue JSONRPC::Error::ServerError => e
+    # @logger.error e
+    true
   end
 end

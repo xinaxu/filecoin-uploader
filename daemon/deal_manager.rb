@@ -1,8 +1,9 @@
 require_relative '../database/database'
 require_relative '../client/lotus'
+require_relative '../util/sample'
+
 class DealManager
-  def initialize(miner_manager,
-                 wallet,
+  def initialize(wallet,
                  max_price = 1e9,
                  duration = 518_400,
                  min_copies = 10,
@@ -10,23 +11,15 @@ class DealManager
     @duration = duration
     @wallet = wallet
     @max_price = max_price
-    @miner_manager = miner_manager
     @logger = Logger.new(STDOUT)
-    @lotus = LotusClient.new
-    @base_path = File.join(ENV['slingshot_data_path'])
+    @lotus = LotusClient.new 60
     @min_copies = min_copies
-    @current_imported = @lotus.client_list_imports
     @miner_blacklist = miner_blacklist
-    Retrieval.where(state: 'started').update(state: 'new')
   end
 
   def state_error?(deal_state)
-    %i[StorageDealProposalRejected StorageDealProposalNotFound
+    %w[StorageDealProposalRejected StorageDealProposalNotFound
        StorageDealSlashed StorageDealError].include? deal_state
-  end
-
-  def state_expired?(deal_state)
-    deal_state == :StorageDealExpired
   end
 
   def state_valid?(deal_state)
@@ -34,113 +27,116 @@ class DealManager
   end
 
   def state_success?(deal_state)
-    deal_state == :StorageDealActive
+    deal_state == 'StorageDealActive'
   end
 
-  def daemonize(poll_interval = 60)
+  def state_expired?(deal_state)
+    deal_state == 'StorageDealExpired'
+  end
+
+  def run_once
+    @logger.info 'Checking all current deals'
+    current_deals = @lotus.client_list_deals
+    # update database
+    current_deals.each do |deal|
+      d = Deal.find_by(proposal_cid: deal.proposal_cid)
+      if d.nil?
+        Deal.create(
+            proposal_cid: deal.proposal_cid,
+            deal_id: deal.deal_id,
+            state: deal.state,
+            duration: deal.duration,
+            creation_time: deal.creation_time,
+            slashed: @lotus.deal_slashed?(deal.deal_id),
+            retrieval_state: 'new',
+            archive: Archive.find_by(data_cid: deal.data_cid),
+            miner: Miner.find_by(miner_id: deal.miner_id)
+        )
+      else
+        d.update(
+            deal_id: deal.deal_id,
+            state: deal.state,
+            duration: deal.duration,
+            creation_time: deal.creation_time,
+            slashed: @lotus.deal_slashed?(deal.deal_id)
+        )
+      end
+    end
+
+    Archive.all.each do |archive|
+      make_deal archive
+      # check_done archive, deals_by_cid[archive.data_cid]
+    end
+
+    @logger.info 'Checking deals complete'
+  end
+
+  def daemonize(poll_interval = 600)
     Thread.new do
       loop do
-        @logger.info 'Checking all current deals'
-        current_deals = @lotus.client_list_deals
-        deals_by_cid = current_deals.group_by(&:data_cid)
-        deals_by_miner = current_deals.group_by(&:miner_id)
-        deals_by_miner.each do |miner_id, deals|
-          total = deals.length
-          valid = deals.count { |deal| state_valid?(deal.state) }
-          Miner.where(miner_id: miner_id).update(deal_started: total, deal_success: valid)
-        end
-        Archive.all.each do |archive|
-          case archive.state
-          when 'new'
-            import archive
-          when 'started'
-            make_deal archive, deals_by_cid[archive.data_cid] || []
-          when 'done'
-            check_done archive, deals_by_cid[archive.data_cid]
-          end
-        end
-        @logger.info 'Checking deals complete'
+        run_once
         sleep poll_interval
       end
     end
   end
 
-  def import(archive)
-    imported = @current_imported.find do |imported|
-      imported.file_path == File.join(@base_path, archive.dataset, archive.filename)
-    end
-    if imported.nil?
-      data_cid, import_id = @lotus.client_import File.join(@base_path, archive.dataset, archive.filename)
-      @logger.info("Imported to lotus #{archive.dataset}/#{archive.filename} - [#{import_id}] #{data_cid}")
-    else
-      data_cid = imported.data_cid
-      import_id = imported.import_id
-    end
-    piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
-    archive.update(state: 'started', data_cid: data_cid, piece_cid: piece_cid,
-                   import_id: import_id, piece_size: piece_size)
-  end
 
-  def make_deal(archive, current_deals)
-    success_deals = current_deals.count { |deal| state_success?(deal.state) }
-    if success_deals >= @min_copies
-      archive.update(state: 'done')
-      return
+  def make_deal(archive)
+    archive.deals.where(state: 'StorageDealActive', slashed: false, retrieval_state: 'new').each do |deal|
+      # check_done archive, deal
     end
 
-    valid_deals = current_deals.count { |deal| state_valid?(deal.state) }
+    valid_deals = archive.deals.where.not(state: %w[StorageDealProposalRejected StorageDealProposalNotFound
+                                           StorageDealSlashed StorageDealError])
+                      .where(slashed: false).count
     return if valid_deals >= @min_copies
 
-    miners = @miner_manager.get_miners_for_sealing(@min_copies - valid_deals, @max_price, archive.piece_size,
-                                                    current_deals.map(&:miner_id).push(@miner_blacklist))
+    miners = get_miners_for_sealing(@min_copies - valid_deals, @max_price, archive.piece_size,
+                                    archive.miners.map(&:miner_id))
     miners.each do |miner|
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
-                   "#{miner.miner_id} and epoch price #{epoch_price / 1e18}")
+                   "#{miner.miner_id} and total price #{epoch_price * @duration / 1e18} (#{miner.price.to_f} * #{archive.piece_size} * #{@duration})")
       @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
     end
   end
 
-  def check_done(archive, current_deals)
-    all_complete = current_deals.filter { |deal| state_success?(deal.state) }.all do |deal|
-      current_retrieval = Retrieval.find_by(proposal_cid: deal.proposal_cid)
-      current_retrieval != nil && %w[success failed].include?(current_retrieval.state)
+  def get_miners_for_sealing(number, price, piece_size, excluded_miner_ids)
+    miners = Miner.where('min_piece_size <= ? AND max_piece_size >= ? AND online = ?', piece_size, piece_size, true)
+                 .reject do |miner|
+      miner.price.to_i > price.to_i || excluded_miner_ids.include?(miner.miner_id)
     end
-
-    if all_complete
-      archive.update(state: 'verified')
-      return
+    miners = miners.map do |miner|
+      ratio = 1.0 - miner.deals.where('state in (?, ?, ?, ?) or slashed = ? or retrieval_state = ?',
+                                      'StorageDealProposalRejected',
+                                      'StorageDealProposalNotFound',
+                                      'StorageDealSlashed',
+                                      'StorageDealError',
+                                      true,
+                                      'failed').count / (1.0 + miner.deals.count)
+      [miner, ratio]
     end
+    weighted_samples(miners, number).reject { |miner, rate| miner.nil? }
+  end
 
-    current_deals.filter { |deal| state_success?(deal.state) }
-                 .each do |deal|
-      current_retrieval = Retrieval.find_by(proposal_cid: deal.proposal_cid)
-      if current_retrieval == nil
-        current_retrieval = Retrieval.create(
-          miner: Miner.find_by(miner_id: deal.miner_id),
-          archive: archive,
-          state: 'new'
-        )
+  def check_done(archive, deal)
+    Thread.new do
+      lotus = LotusClient.new(300)
+      @logger.info "Querying offer with #{deal.miner_id} for #{archive.dataset}/#{archive.filename}"
+      offer = lotus.client_miner_query_offer(deal.miner_id, deal.data_cid)
+      unless %i[timeout, error].include?(offer)
+        @logger.info "Retrieving with #{offer.miner_id} - #{offer.peer_address} for #{archive.dataset}/#{archive.filename}"
+        lotus = LotusClient.new(7200)
+        response = lotus.client_retrieve(offer.data_cid, offer.size, offer.min_price,
+                                         offer.unseal_price, offer.payment_interval,
+                                         offer.payment_interval_increase, @wallet,
+                                         offer.miner_id, offer.peer_address, offer.peer_id,
+                                         '/dev/null')
       end
-      next if current_retrieval.state != 'new'
-
-      Thread.new do
-        lotus = LotusClient.new(300)
-        @logger.info "Querying offer with #{deal.miner_id} for #{archive.dataset}/#{archive.filename}"
-        offer = lotus.client_miner_query_offer(deal.miner_id, deal.data_cid)
-        unless %i[timeout, error].include?(offer)
-          @logger.info "Retrieving with #{offer.miner_id} - #{offer.peer_address} for #{archive.dataset}/#{archive.filename}"
-          response = lotus.client_retrieve(offer.data_cid, offer.size, offer.min_price,
-                                           offer.unseal_price, offer.payment_interval,
-                                           offer.payment_interval_increase, @wallet,
-                                           offer.miner_id, offer.peer_address, offer.peer_id,
-                                           '/dev/null')
-        end
-        if %i[timeout, error].include?(offer) || %i[timeout, error].include?(response)
-          current_retrieval.update(state: 'failed')
-        else
-          current_retrieval.update(state: 'success')
-        end
+      if %i[timeout, error].include?(offer) || %i[timeout, error].include?(response)
+        deal.update(retrieval_state: 'failed')
+      else
+        deal.update(retrieval_state: 'success')
       end
     end
   end

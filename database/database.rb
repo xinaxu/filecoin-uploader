@@ -26,26 +26,28 @@ ActiveRecord::Schema.define do
     table.integer :max_piece_size
     table.integer :last_update
     table.boolean :online
-    table.integer :deal_started
-    table.integer :deal_success
   end
 
   create_table :archives, if_not_exists: true do |table|
     table.string :dataset
     table.string :filename
     table.string :format
-    table.string :state # new, started, done, verified
     table.string :data_cid
     table.string :piece_cid
     table.integer :import_id
     table.integer :piece_size
   end
 
-  create_table :retrievals, if_not_exists: true do |table|
-    table.belongs_to :miner
+  create_table :deals, if_not_exists: true do |table|
+    table.string  :proposal_cid
+    table.integer :deal_id
+    table.string  :state
+    table.integer :duration
+    table.string :creation_time
+    table.boolean :slashed
+    table.string  :retrieval_state # new, success, failed
     table.belongs_to :archive
-    table.string :proposal_cid
-    table.string :state # new, started, success, failed
+    table.belongs_to :miner
   end
 
   change_column :miners, :sector_size, 'BIGINT UNSIGNED'
@@ -55,16 +57,20 @@ ActiveRecord::Schema.define do
 
   add_index :miners, :miner_id, unique: true
   add_index :archives, %i[dataset filename], unique: true
-  add_index :retrievals, :proposal_cid, unique: true
+  add_index :archives, :data_cid
+  add_index :deals, :proposal_cid, unique: true
 end
 
 class Miner < ActiveRecord::Base
-  has_many :retrievals
+  has_many :deals
 end
 
 class Archive < ActiveRecord::Base
-  has_many :retrievals
+  has_many :deals
+  has_many :miners, through: :deals
 end
 
-class Retrieval < ActiveRecord::Base
+class Deal < ActiveRecord::Base
+  belongs_to :archive
+  belongs_to :miner
 end
