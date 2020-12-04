@@ -48,7 +48,7 @@ class DealManager
             duration: deal.duration,
             creation_time: deal.creation_time,
             slashed: @lotus.deal_slashed?(deal.deal_id),
-            retrieval_state: 'new',
+            retrieval_state: 0,
             archive: Archive.find_by(data_cid: deal.data_cid),
             miner: Miner.find_by(miner_id: deal.miner_id)
         )
@@ -65,7 +65,6 @@ class DealManager
 
     Archive.all.each do |archive|
       make_deal archive
-      # check_done archive, deals_by_cid[archive.data_cid]
     end
 
     @logger.info 'Checking deals complete'
@@ -82,10 +81,6 @@ class DealManager
 
 
   def make_deal(archive)
-    archive.deals.where(state: 'StorageDealActive', slashed: false, retrieval_state: 'new').each do |deal|
-      # check_done archive, deal
-    end
-
     valid_deals = archive.deals.where.not(state: %w[StorageDealProposalRejected StorageDealProposalNotFound
                                            StorageDealSlashed StorageDealError])
                       .where(slashed: false).count
@@ -117,27 +112,5 @@ class DealManager
       [miner, ratio]
     end
     weighted_samples(miners, number).reject { |miner, rate| miner.nil? }
-  end
-
-  def check_done(archive, deal)
-    Thread.new do
-      lotus = LotusClient.new(300)
-      @logger.info "Querying offer with #{deal.miner_id} for #{archive.dataset}/#{archive.filename}"
-      offer = lotus.client_miner_query_offer(deal.miner_id, deal.data_cid)
-      unless %i[timeout, error].include?(offer)
-        @logger.info "Retrieving with #{offer.miner_id} - #{offer.peer_address} for #{archive.dataset}/#{archive.filename}"
-        lotus = LotusClient.new(7200)
-        response = lotus.client_retrieve(offer.data_cid, offer.size, offer.min_price,
-                                         offer.unseal_price, offer.payment_interval,
-                                         offer.payment_interval_increase, @wallet,
-                                         offer.miner_id, offer.peer_address, offer.peer_id,
-                                         '/dev/null')
-      end
-      if %i[timeout, error].include?(offer) || %i[timeout, error].include?(response)
-        deal.update(retrieval_state: 'failed')
-      else
-        deal.update(retrieval_state: 'success')
-      end
-    end
   end
 end

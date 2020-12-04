@@ -14,7 +14,7 @@ class RetrievalManager
 
   def run_once
     @logger.info 'Starting retrieval tests'
-    Parallel.each(Deal.where(retrieval_state: 'new', state: 'StorageDealActive', slashed: false).to_a, in_threads: @num_threads) do |deal|
+    Parallel.each(Deal.where(retrieval_state: 0, state: 'StorageDealActive', slashed: false).to_a, in_threads: @num_threads) do |deal|
       archive = deal.archive
       miner = deal.miner
       # Assume 256KiB/s transfer rate
@@ -23,7 +23,7 @@ class RetrievalManager
       offer = lotus.client_miner_query_offer(miner.miner_id, archive.data_cid)
       if %i[timeout error].include?(offer)
         @logger.info "[#{archive.dataset}/#{archive.filename}] Querying offer failed with #{offer}"
-        deal.update(retrieval_state: 'failed')
+        deal.increment!(:retrieval_state)
         next
       end
       if offer.min_price.to_i > @max_price.to_i
@@ -40,11 +40,11 @@ class RetrievalManager
                                        '/dev/null')
       if %i[timeout error].include?(response)
         @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval failed with #{response}"
-        deal.update(retrieval_state: 'failed')
+        deal.increment!(:retrieval_state)
         next
       end
       @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval succeeded."
-      deal.update(retrieval_state: 'success')
+      deal.update(retrieval_state: -1)
     end
 
     @logger.info 'Retrieval complete'
