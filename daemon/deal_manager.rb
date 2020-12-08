@@ -1,13 +1,15 @@
 require_relative '../database/database'
 require_relative '../client/lotus'
 require_relative '../util/sample'
+require 'socket'
 
 class DealManager
   def initialize(wallet,
-                 max_price = 1e9,
+                 max_price = 1e10,
                  duration = 518_400,
                  min_copies = 10,
-                 miner_blacklist = [])
+                 miner_blacklist = []
+                 )
     @duration = duration
     @wallet = wallet
     @max_price = max_price
@@ -15,6 +17,7 @@ class DealManager
     @lotus = LotusClient.new 60
     @min_copies = min_copies
     @miner_blacklist = miner_blacklist
+    @host = Socket.gethostname
   end
 
   def state_error?(deal_state)
@@ -34,7 +37,7 @@ class DealManager
     deal_state == 'StorageDealExpired'
   end
 
-  def run_once
+  def run_once(count = 32)
     @logger.info 'Checking all current deals'
     current_deals = @lotus.client_list_deals
     # update database
@@ -49,7 +52,7 @@ class DealManager
             creation_time: deal.creation_time,
             slashed: @lotus.deal_slashed?(deal.deal_id),
             retrieval_state: 0,
-            archive: Archive.find_by(data_cid: deal.data_cid),
+            archive: Archive.find_by(data_cid: deal.data_cid, host: @host),
             miner: Miner.find_by(miner_id: deal.miner_id)
         )
       else
@@ -63,37 +66,32 @@ class DealManager
       end
     end
 
-    Archive.all.each do |archive|
-      make_deal archive
+    Archive.where(host: @host).shuffle.each do |archive|
+      break if count <= 0
+      count = make_deal archive, count
     end
 
     @logger.info 'Checking deals complete'
   end
 
-  def daemonize(poll_interval = 600)
-    Thread.new do
-      loop do
-        run_once
-        sleep poll_interval
-      end
-    end
-  end
-
-
-  def make_deal(archive)
+  def make_deal(archive, count)
     valid_deals = archive.deals.where.not(state: %w[StorageDealProposalRejected StorageDealProposalNotFound
                                            StorageDealSlashed StorageDealError])
                       .where(slashed: false).count
-    return if valid_deals >= @min_copies
+    return count if valid_deals >= @min_copies
 
     miners = get_miners_for_sealing(@min_copies - valid_deals, @max_price, archive.piece_size,
                                     archive.miners.map(&:miner_id))
     miners.each do |miner|
+      break if count <= 0
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
                    "#{miner.miner_id} and total price #{epoch_price * @duration / 1e18} (#{miner.price.to_f} * #{archive.piece_size} * #{@duration})")
       @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
+      count -= 1
     end
+
+    return count
   end
 
   def get_miners_for_sealing(number, price, piece_size, excluded_miner_ids)

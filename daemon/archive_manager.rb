@@ -1,14 +1,16 @@
 require_relative '../database/database'
+require 'socket'
 
 class ArchiveManager
   def initialize
     @logger = Logger.new(STDOUT)
     @lotus = LotusClient.new
-    @current_imported = @lotus.client_list_imports
     @base_path = File.join(ENV['slingshot_data_path'])
+    @host = Socket.gethostname
   end
 
   def run_once(modified_before = 5)
+    @current_imported = @lotus.client_list_imports
     @logger.info 'Polling data folder for change'
     base_path = File.join(ENV['slingshot_data_path'])
     Dir.each_child(base_path) do |data_set|
@@ -35,15 +37,6 @@ class ArchiveManager
     @logger.info 'Polling data complete'
   end
 
-  def daemonize(poll_interval = 60, modified_before = 5)
-    Thread.new do
-      loop do
-        run_once modified_before
-        sleep poll_interval
-      end
-    end
-  end
-
   def get_format(file_name)
     segments = file_name.split('.')
     return 'binary' if segments.length == 1
@@ -60,7 +53,7 @@ class ArchiveManager
   end
 
   def db_import(data_set, file_name)
-    return unless Archive.find_by(dataset: data_set, filename: file_name).nil?
+    return unless Archive.find_by(dataset: data_set, filename: file_name, host: @host).nil?
 
     format = get_format(file_name)
     @logger.info "Import to database #{data_set}/#{file_name}, format: #{format}"
@@ -78,7 +71,8 @@ class ArchiveManager
     piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
     Archive.create(dataset: data_set, filename: file_name, format: format,
                    data_cid: data_cid, piece_cid: piece_cid,
-                   import_id: import_id, piece_size: piece_size)
+                   import_id: import_id, piece_size: piece_size,
+                   host: @host)
   end
 end
 

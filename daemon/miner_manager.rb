@@ -3,7 +3,7 @@ require_relative '../database/database'
 require 'parallel'
 
 class MinerManager
-  def initialize(num_threads = 32)
+  def initialize(num_threads = 16)
     @lotus = LotusClient.new
     @num_threads = num_threads
     @logger = Logger.new(STDOUT)
@@ -45,7 +45,7 @@ class MinerManager
     end
   end
 
-  def run_once(update_interval = 0)
+  def run_once
     @logger.info 'Start updating miners'
     miner_ids = @lotus.state_list_miners
     Parallel.each(miner_ids, in_threads: @num_threads) do |miner_id|
@@ -55,19 +55,8 @@ class MinerManager
         next
       end
 
-      if Time.now.to_i - miner.last_update > update_interval
-        update_each miner
-      end
+      update_each miner
     end
     @logger.info 'Miner update complete'
-  end
-
-  def daemonize(check_interval = 3600, update_interval = 86400)
-    Thread.new do
-      loop do
-        run_once update_interval
-        sleep check_interval
-      end
-    end
   end
 end

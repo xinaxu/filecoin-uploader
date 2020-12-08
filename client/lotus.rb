@@ -1,4 +1,5 @@
 require 'jsonrpc-client'
+require 'logger'
 
 MinerPower = Struct.new(:miner_power, :total_power, :has_min_power)
 StorageAsk = Struct.new(:price, :verified_price, :min_piece_size, :max_piece_size)
@@ -39,8 +40,9 @@ class LotusClient
     StorageDealError
     StorageDealProviderTransferRestart
     StorageDealClientTransferRestart
+    StorageDealAwaitingPreCommit
   ]
-  def initialize(timeout = 15)
+  def initialize(timeout = 60)
     connection = Faraday.new { |connection|
       connection.adapter Faraday.default_adapter
       connection.authorization(:Bearer, ENV['lotus_token'])
@@ -174,7 +176,7 @@ class LotusClient
   rescue Faraday::TimeoutError
     :timeout
   rescue JSONRPC::Error::ServerError => e
-    @logger.error e
+    @logger.error e.to_s.lines[0]
     :error
   end
 

@@ -8,7 +8,7 @@ ActiveRecord::Base.establish_connection(
   database: 'lotus',
   username: 'root',
   password: 'password',
-  pool: 64,
+  pool: 128,
   timeout: 30
 )
 
@@ -36,6 +36,7 @@ ActiveRecord::Schema.define do
     table.string :piece_cid
     table.integer :import_id
     table.integer :piece_size
+    table.string :host
   end
 
   create_table :deals, if_not_exists: true do |table|
