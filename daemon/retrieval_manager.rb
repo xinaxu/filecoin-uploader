@@ -19,7 +19,7 @@ class RetrievalManager
     count = 0
     Parallel.each(Deal.where(retrieval_state: 0, state: 'StorageDealActive', slashed: false).to_a, in_threads: @num_threads) do |deal|
       archive = deal.archive
-      next if archive.host != @host
+      next if archive.nil? || archive.host != @host
 
       miner = deal.miner
       lotus = LotusClient.new 120
