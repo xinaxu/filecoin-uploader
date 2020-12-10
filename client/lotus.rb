@@ -8,8 +8,28 @@ DealInfo = Struct.new(:proposal_cid, :state, :miner_id, :data_cid, :piece_cid, :
 Import = Struct.new(:import_id, :data_cid, :file_path)
 QueryOffer = Struct.new(:data_cid, :size, :min_price, :unseal_price, :payment_interval,
                         :payment_interval_increase, :miner_id, :peer_address, :peer_id)
+Transfer = Struct.new(:transfer_id, :status, :data_cid, :is_initiator, :is_sender, :voucher, :message, :peer_id, :transferred)
 
 class LotusClient
+  @@transfer_state_map = %i[
+    Requested
+    Ongoing
+    TransferFinished
+    ResponderCompleted
+    Finalizing
+    Completing
+    Completed
+    Failing
+    Failed
+    Cancelling
+    Cancelled
+    InitiatorPaused
+    ResponderPaused
+    BothPaused
+    ResponderFinalizing
+    ResponderFinalizingTransferFinished
+    ChannelNotFoundError
+  ]
   @@deal_state_map = %i[
     StorageDealUnknown
     StorageDealProposalNotFound
@@ -188,5 +208,13 @@ class LotusClient
   rescue JSONRPC::Error::ServerError => e
     # @logger.error e
     true
+  end
+
+  def client_list_data_transfers
+    response = @client.invoke('Filecoin.ClientListDataTransfers', [])
+    response.map do |transfer|
+      Transfer.new(transfer['TransferID'], @@transfer_state_map[transfer['Status']], transfer['BaseCID']['/'], transfer['IsInitiator'], transfer['IsSender'],
+                   transfer['Voucher'], transfer['Message'], transfer['OtherPeer'], transfer['Transferred'])
+    end
   end
 end
