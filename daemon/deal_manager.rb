@@ -18,6 +18,7 @@ class DealManager
     @min_copies = min_copies
     @miner_blacklist = miner_blacklist
     @host = Socket.gethostname
+    @base_path = File.join(ENV['slingshot_data_path'])
   end
 
   def state_error?(deal_state)
@@ -37,7 +38,7 @@ class DealManager
     deal_state == 'StorageDealExpired'
   end
 
-  def run_once(count = 32)
+  def run_once(count = 128)
     @logger.info 'Checking all current deals'
     current_deals = @lotus.client_list_deals
     # update database
@@ -67,6 +68,7 @@ class DealManager
     end
 
     Archive.where(host: @host).shuffle.each do |archive|
+      next unless File.exists? File.join(@base_path, archive.dataset, archive.filename)
       break if count <= 0
       count = make_deal archive, count
     end

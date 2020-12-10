@@ -17,9 +17,8 @@ class RetrievalManager
   def run_once
     @logger.info 'Starting retrieval tests'
     count = 0
-    Parallel.each(Deal.where(retrieval_state: 0, state: 'StorageDealActive', slashed: false).to_a, in_threads: @num_threads) do |deal|
+    Parallel.each(Deal.joins(:archive).where(archives: {host: @host}, retrieval_state: 0, state: 'StorageDealActive', slashed: false).to_a, in_threads: @num_threads) do |deal|
       archive = deal.archive
-      next if archive.nil? || archive.host != @host
 
       miner = deal.miner
       lotus = LotusClient.new 120
