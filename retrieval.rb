@@ -32,7 +32,7 @@ path = options[:path] || Dir.getwd
 
 files.each do |filename, deals|
   puts "Retrieving #{filename}"
-  Parallel.each(deals, in_threads: deals.count) do |deal|
+  Parallel.each(deals, in_processes: deals.count) do |deal|
     miner = deal[1]
     cid = deal[2]
     offer = LotusClient.new(60).client_miner_query_offer(miner, cid)
