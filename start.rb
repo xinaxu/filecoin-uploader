@@ -27,7 +27,6 @@ end
 loop do
   archive_manager.run_once
   deal_manager.run_once
-  if retrieval_manager.run_once == 0
-    sleep 3600
-  end
+  retrieval_manager.run_once
+  sleep 3600
 end
