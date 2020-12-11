@@ -4,7 +4,7 @@ require 'socket'
 class ArchiveManager
   def initialize
     @logger = Logger.new(STDOUT)
-    @lotus = LotusClient.new
+    @lotus = LotusClient.new 600
     @base_path = File.join(ENV['slingshot_data_path'])
     @host = Socket.gethostname
   end
