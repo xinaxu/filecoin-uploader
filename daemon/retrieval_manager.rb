@@ -65,7 +65,7 @@ class RetrievalManager
       deal = Deal.find_by(archive: archive, miner: miner)
       next if deal.nil?
       if %i[Cancelled Failed].include? transfer.status
-        if deal.retrieval_state >= 0
+        if deal.retrieval_state == 0 || deal.retrieval_state > 1
           @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval failed with miner #{miner.miner_id}"
           deal.update(retrieval_state: -1) 
         end
@@ -76,7 +76,7 @@ class RetrievalManager
         end
       elsif deal.retrieval_state > 1 && Time.now.to_i - deal.retrieval_state > 7 * 24 * 3600
         @lotus.client_cancel_data_transfer transfer_id, peer_id, true
-        if deal.retrieval_state >= 0
+        if deal.retrieval_state == 0 || deal.retrieval_state > 1
           @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval cancelled with miner #{miner.miner_id}"
           deal.update(retrieval_state: -1) 
         end
