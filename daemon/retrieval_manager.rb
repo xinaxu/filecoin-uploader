@@ -12,7 +12,7 @@ class RetrievalManager
     @logger = Logger.new(STDOUT)
     @n_threads = n_threads
     @host = Socket.gethostname
-    @lotus = LotusClient.new
+    @lotus = LotusClient.new 30
   end
 
   def run_once

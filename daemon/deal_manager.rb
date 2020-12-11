@@ -14,7 +14,7 @@ class DealManager
     @wallet = wallet
     @max_price = max_price
     @logger = Logger.new(STDOUT)
-    @lotus = LotusClient.new 60
+    @lotus = LotusClient.new 7200
     @min_copies = min_copies
     @miner_blacklist = miner_blacklist
     @host = Socket.gethostname
@@ -38,7 +38,7 @@ class DealManager
     deal_state == 'StorageDealExpired'
   end
 
-  def run_once(count = 128)
+  def run_once(count = 10)
     @logger.info 'Checking all current deals'
     current_deals = @lotus.client_list_deals
     # update database
@@ -89,7 +89,9 @@ class DealManager
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
                    "#{miner.miner_id} and total price #{epoch_price * @duration / 1e18} (#{miner.price.to_f} * #{archive.piece_size} * #{@duration})")
-      @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
+      if :timeout == @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
+        raise :timeout
+      end
       count -= 1
     end
 
