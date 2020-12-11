@@ -124,6 +124,12 @@ class LotusClient
     [response['PieceSize'], response['PieceCID']['/']]
   end
 
+  # @return piece_size(int)
+  def client_deal_size(data_cid)
+    response = @client.invoke('Filecoin.ClientDealSize', [{ '/' => data_cid }])
+    response['PieceSize']
+  end
+
   # @return proposal_cid
   def client_start_deal(data_cid, wallet, miner_id, epoch_price, duration)
     @client.invoke('Filecoin.ClientStartDeal', [

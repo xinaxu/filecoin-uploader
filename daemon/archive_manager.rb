@@ -68,7 +68,7 @@ class ArchiveManager
       data_cid = imported.data_cid
       import_id = imported.import_id
     end
-    # piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
+    piece_size = @lotus.client_deal_size(data_cid)
     Archive.create(dataset: data_set, filename: file_name, format: format,
                    data_cid: data_cid, piece_cid: nil,
                    import_id: import_id, piece_size: piece_size,
