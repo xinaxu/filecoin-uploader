@@ -4,7 +4,7 @@ require 'socket'
 class ArchiveManager
   def initialize
     @logger = Logger.new(STDOUT)
-    @lotus = LotusClient.new 600
+    @lotus = LotusClient.new 1200
     @base_path = File.join(ENV['slingshot_data_path'])
     @host = Socket.gethostname
   end
@@ -68,9 +68,9 @@ class ArchiveManager
       data_cid = imported.data_cid
       import_id = imported.import_id
     end
-    piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
+    # piece_size, piece_cid = @lotus.client_deal_piece_cid(data_cid)
     Archive.create(dataset: data_set, filename: file_name, format: format,
-                   data_cid: data_cid, piece_cid: piece_cid,
+                   data_cid: data_cid, piece_cid: nil,
                    import_id: import_id, piece_size: piece_size,
                    host: @host)
   end

@@ -57,7 +57,7 @@ ActiveRecord::Schema.define do
   change_column :archives, :piece_size, 'BIGINT UNSIGNED'
 
   add_index :miners, :miner_id, unique: true
-  add_index :archives, %i[dataset filename], unique: true
+  add_index :archives, %i[dataset filename host], unique: true
   add_index :archives, :data_cid
   add_index :deals, :proposal_cid, unique: true
 end
