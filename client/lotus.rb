@@ -224,4 +224,11 @@ class LotusClient
     @logger.error e.to_s.lines[0]
     :error
   end
+
+  def client_restart_data_transfer(transfer_id, peer_id, is_initiator)
+    @client.invoke('Filecoin.ClientRestartDataTransfer', [transfer_id, peer_id, is_initiator])
+  rescue JSONRPC::Error::ServerError => e
+    @logger.error e.to_s.lines[0]
+    :error
+  end
 end
