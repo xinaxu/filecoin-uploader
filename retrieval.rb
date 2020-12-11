@@ -29,13 +29,16 @@ wallet = options[:wallet] || LotusClient.new.wallet_default_address
 files = all_deals.filter{|deal| filter.match(deal[3]) }.group_by{|x|x[3]}
 price = options[:price] || 0.0001
 path = options[:path] || Dir.getwd
+lotus = LotusClient.new
 
 files.each do |filename, deals|
   puts "Retrieving #{filename}"
+  cid = deals[0][2]
   Parallel.each(deals, in_processes: deals.count) do |deal|
     miner = deal[1]
     cid = deal[2]
-    offer = LotusClient.new(60).client_miner_query_offer(miner, cid)
+    lotus = LotusClient.new(60)
+    offer = lotus.client_miner_query_offer(miner, cid)
     if %i[timeout error].include? offer
       puts "#{miner} query offer failed with #{offer}"
       next
@@ -56,4 +59,10 @@ files.each do |filename, deals|
       raise Parallel::Kill
     end
   end
+  # Cancel all related transfers
+  lotus.client_list_data_transfers.filter {|transfer| !transfer.is_sender && transfer.is_initiator &&
+                                               !%i[Failed Cancelled Completed].include?(transfer.status) &&
+                                               transfer.data_cid == cid}.each do |transfer|
+                                                 lotus.client_cancel_data_transfer transfer.transfer_id, transfer.peer_id, true
+                                               end
 end
