@@ -46,7 +46,7 @@ ActiveRecord::Schema.define do
     table.integer :duration
     table.string :creation_time
     table.boolean :slashed
-    table.integer :retrieval_state # 0: new, -1: success, n: failed times
+    table.integer :retrieval_state # 0: new, 1: success, -1, -2, ...: failed, x: channel start time
     table.belongs_to :archive
     table.belongs_to :miner
   end
