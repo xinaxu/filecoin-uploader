@@ -25,6 +25,7 @@ ActiveRecord::Schema.define do
     table.integer :min_piece_size
     table.integer :max_piece_size
     table.integer :last_update
+    table.integer :score
     table.boolean :online
   end
 

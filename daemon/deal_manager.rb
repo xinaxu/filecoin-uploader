@@ -104,14 +104,7 @@ class DealManager
       miner.price.to_i > price.to_i || excluded_miner_ids.include?(miner.miner_id)
     end
     miners = miners.map do |miner|
-      ratio = 1.0 - miner.deals.where('state in (?, ?, ?, ?) or slashed = ? or retrieval_state < 0',
-                                      'StorageDealProposalRejected',
-                                      'StorageDealProposalNotFound',
-                                      'StorageDealSlashed',
-                                      'StorageDealError',
-                                      true
-                                      ).count / (1.0 + miner.deals.count)
-      [miner, ratio]
+      [miner, miner.score.to_f]
     end
     weighted_samples(miners, number).reject { |miner, rate| miner.nil? }
   end

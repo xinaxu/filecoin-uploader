@@ -23,6 +23,7 @@ class MinerManager
                  min_piece_size: storage_ask.min_piece_size,
                  max_piece_size: storage_ask.max_piece_size,
                  last_update: Time.now.to_i,
+                 score: 0,
                  online: true)
   end
 
@@ -43,6 +44,18 @@ class MinerManager
                    last_update: Time.now.to_i,
                    online: true)
     end
+
+    score = miner.deals.map do |deal|
+      if deal.state == 'StorageDealActive' && deal.retrieval_state == 1
+        5
+      elsif deal.state == 'StorageDealActive' && !deal.slashed
+        1
+      else
+        0
+      end
+    end.reduce(1, :+)
+
+    miner.update(score: score)
   end
 
   def run_once
