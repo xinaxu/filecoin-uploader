@@ -12,7 +12,7 @@ miner_manager = MinerManager.new
 archive_manager = ArchiveManager.new
 deal_manager = DealManager.new(wallet,
                                1e10,
-                               518_400,
+                               1051200,
                                10,
                                ['f064218'])
 retrieval_manager = RetrievalManager.new(wallet)
