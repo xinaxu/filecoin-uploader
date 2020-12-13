@@ -29,4 +29,6 @@ loop do
   deal_manager.run_once
   retrieval_manager.run_once
   sleep 600
+rescue Faraday::ConnectionFailed
+  sleep 1800
 end
