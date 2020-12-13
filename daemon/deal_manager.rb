@@ -38,7 +38,7 @@ class DealManager
     deal_state == 'StorageDealExpired'
   end
 
-  def run_once(count = 10)
+  def run_once
     @logger.info 'Checking all current deals'
     current_deals = @lotus.client_list_deals
     # update database
@@ -69,39 +69,34 @@ class DealManager
 
     Archive.where(host: @host).shuffle.each do |archive|
       next unless File.exists? File.join(@base_path, archive.dataset, archive.filename)
-      break if count <= 0
-      count = make_deal archive, count
+      make_deal archive
     end
 
     @logger.info 'Checking deals complete'
   end
 
-  def make_deal(archive, count)
+  def make_deal(archive)
     valid_deals = archive.deals.where.not(state: %w[StorageDealProposalRejected StorageDealProposalNotFound
                                            StorageDealSlashed StorageDealError])
                       .where(slashed: false).count
-    return count if valid_deals >= @min_copies
+    return if valid_deals >= @min_copies
 
-    miners = get_miners_for_sealing(@min_copies - valid_deals, @max_price, archive.piece_size,
+    miners = get_miners_for_sealing(1, @max_price, archive.piece_size,
                                     archive.miners.map(&:miner_id))
     miners.each do |miner|
-      break if count <= 0
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
                    "#{miner.miner_id} and total price #{epoch_price * @duration / 1e18} (#{miner.price.to_f} * #{archive.piece_size} * #{@duration})")
       if :timeout == @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
         raise :timeout
       end
-      count -= 1
     end
-
-    return count
   end
 
   def get_miners_for_sealing(number, price, piece_size, excluded_miner_ids)
     miners = Miner.where('min_piece_size <= ? AND max_piece_size >= ? AND online = ?', piece_size, piece_size, true)
                  .reject do |miner|
-      miner.price.to_i > price.to_i || excluded_miner_ids.include?(miner.miner_id)
+      miner.price.to_i > price.to_i || excluded_miner_ids.include?(miner.miner_id) || @miner_blacklist.include?(miner.miner_id)
     end
     miners = miners.map do |miner|
       [miner, miner.score.to_f]
