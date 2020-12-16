@@ -74,15 +74,16 @@ class RetrievalManager
           @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval succeeded with miner #{miner.miner_id}"
           deal.update(retrieval_state: 1) 
         end
-      elsif deal.retrieval_state > 1 && Time.now.to_i - deal.retrieval_state > 7 * 24 * 3600
-        @lotus.client_cancel_data_transfer transfer_id, peer_id, true
-        if deal.retrieval_state == 0 || deal.retrieval_state > 1
-          @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval cancelled with miner #{miner.miner_id}"
-          deal.update(retrieval_state: -1) 
-        end
+#      elsif deal.retrieval_state > 1 && Time.now.to_i - deal.retrieval_state > 7 * 24 * 3600
+#        @lotus.client_cancel_data_transfer transfer_id, peer_id, true
+#        if deal.retrieval_state == 0 || deal.retrieval_state > 1
+#          @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval cancelled with miner #{miner.miner_id}"
+#          deal.update(retrieval_state: -1) 
+#        end
       elsif deal.retrieval_state > 1 && Time.now.to_i - deal.retrieval_state > 3 * 24 * 3600
         @lotus.client_restart_data_transfer transfer_id, peer_id, true
         @logger.info "[#{archive.dataset}/#{archive.filename}] Retrieval restarted with miner #{miner.miner_id}"
+        deal.update(retrieval_state: Time.now.to_i) 
       end
     end
   end

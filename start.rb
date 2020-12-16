@@ -30,5 +30,5 @@ loop do
   retrieval_manager.run_once
   sleep 600
 rescue Faraday::ConnectionFailed
-  sleep 1800
+  sleep 600
 end
