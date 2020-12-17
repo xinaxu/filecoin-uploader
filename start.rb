@@ -33,6 +33,4 @@ loop do
   rescue Faraday::ConnectionFailed
     sleep 600
   end
-  `sudo systemctl restart lotus-daemon`
-  sleep 600
 end
