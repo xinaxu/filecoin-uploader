@@ -17,18 +17,22 @@ deal_manager = DealManager.new(wallet,
                                ['f064218'])
 retrieval_manager = RetrievalManager.new(wallet)
 
-#Thread.new do
-#  loop do
-#    miner_manager.run_once
-#    sleep(3600 * 6)
-#  end
-#end
+Thread.new do
+  loop do
+    miner_manager.run_once
+    sleep(3600 * 24)
+  end
+end
 
 loop do
-  archive_manager.run_once
-  deal_manager.run_once
-  retrieval_manager.run_once
-  sleep 600
-rescue Faraday::ConnectionFailed
+  begin
+    archive_manager.run_once
+    deal_manager.run_once
+    retrieval_manager.run_once
+    sleep 600
+  rescue Faraday::ConnectionFailed
+    sleep 600
+  end
+  `sudo systemctl restart lotus-daemon`
   sleep 600
 end
