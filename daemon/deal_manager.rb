@@ -4,14 +4,13 @@ require_relative '../util/sample'
 require 'socket'
 
 class DealManager
-  def initialize(wallet,
+  def initialize(
                  max_price = 1e10,
                  duration = 518_400,
                  min_copies = 10,
                  miner_blacklist = []
                  )
     @duration = duration
-    @wallet = wallet
     @max_price = max_price
     @logger = Logger.new(STDOUT)
     @lotus = LotusClient.new 7200
@@ -38,7 +37,7 @@ class DealManager
     deal_state == 'StorageDealExpired'
   end
 
-  def run_once
+  def run_once(dataset, wallet)
     @logger.info 'Checking all current deals'
     current_deals = @lotus.client_list_deals
     # update database
@@ -67,15 +66,15 @@ class DealManager
       end
     end
 
-    Archive.where(host: @host).shuffle.each do |archive|
+    Archive.where(host: @host, dataset: dataset).shuffle.each do |archive|
       next unless File.exists? File.join(@base_path, archive.dataset, archive.filename)
-      make_deal archive
+      make_deal archive, wallet
     end
 
     @logger.info 'Checking deals complete'
   end
 
-  def make_deal(archive)
+  def make_deal(archive, wallet)
     valid_deals = archive.deals.where.not(state: %w[StorageDealProposalRejected StorageDealProposalNotFound
                                            StorageDealSlashed StorageDealError])
                       .where(slashed: false).count
@@ -87,7 +86,7 @@ class DealManager
       epoch_price = (miner.price.to_f * archive.piece_size / 1024 / 1024 / 1024 * 1.000001).ceil
       @logger.info("Making deal for #{archive.dataset}/#{archive.filename} with " \
                    "#{miner.miner_id} and total price #{epoch_price * @duration / 1e18} (#{miner.price.to_f} * #{archive.piece_size} * #{@duration})")
-      if :timeout == @lotus.client_start_deal(archive.data_cid, @wallet, miner.miner_id, epoch_price, @duration)
+      if :timeout == @lotus.client_start_deal(archive.data_cid, wallet, miner.miner_id, epoch_price, @duration)
         raise :timeout
       end
     end

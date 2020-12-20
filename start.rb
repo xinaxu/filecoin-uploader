@@ -10,7 +10,7 @@ wallet = 'f3ukscanavfhuk6sm7fslvnwxcp6uw3z42z2t5rzu3lfys4ljfpldax4t75zzyo5memxa6
 
 miner_manager = MinerManager.new
 archive_manager = ArchiveManager.new
-deal_manager = DealManager.new(wallet,
+deal_manager = DealManager.new(
                                1e10,
                                1051200,
                                10,
@@ -27,7 +27,7 @@ end
 loop do
   begin
     archive_manager.run_once
-    deal_manager.run_once
+    deal_manager.run_once('dataset', wallet)
     retrieval_manager.run_once
     sleep 600
   rescue Faraday::ConnectionFailed
