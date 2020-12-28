@@ -46,13 +46,24 @@ class MinerManager
     end
 
     score = miner.deals.map do |deal|
-      if deal.state == 'StorageDealActive' && deal.retrieval_state == 1
-        5
-      elsif deal.state == 'StorageDealActive' && !deal.slashed
-        1
+      if deal.archive_id == -1
+        if deal.state == 'StorageDealActive' && deal.retrieval_state == 1
+          5
+        elsif deal.state == 'StorageDealActive' && !deal.slashed
+          1
+        else
+          0
+        end
       else
-        0
+        if deal.state == 'StorageDealActive' && deal.retrieval_state == 1
+          10
+        elsif deal.state == 'StorageDealActive' && !deal.slashed
+          3
+        else
+          0
+        end
       end
+
     end.reduce(1, :+)
 
     miner.update(score: score)
